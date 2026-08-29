@@ -1,6 +1,0 @@
-requests
-beautifulsoup4
-reportlab
-python-telegram-bot
-gunicorn
-flask
