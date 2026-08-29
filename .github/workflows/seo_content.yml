@@ -1,28 +1,18 @@
-name: Weekly Programmatic SEO Publisher
-
+name: Weekly Programmatic SEO
 on:
   schedule:
-    # Runs at 10:00 AM UTC every Monday
     - cron: '0 10 * * 1'
   workflow_dispatch:
 
 jobs:
-  publish:
+  content:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-
-      - name: Generate & Publish Case Study
+      - run: pip install -r requirements.txt
+      - run: python content_engine.py
         env:
-          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python content_engine.py
