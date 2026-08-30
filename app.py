@@ -1,4 +1,5 @@
 import os
+import io
 import smtplib
 import traceback
 import requests
@@ -15,7 +16,6 @@ ZOHO_USER = os.getenv("ZOHO_USER", "rohan@isoflowai.in").strip()
 ZOHO_PASS = os.getenv("ZOHO_PASSWORD", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
-# Target Zoho India datacenter SMTP configurations (based on mx.zoho.in DNS setup)
 SMTP_SERVERS = [
     {"host": "smtppro.zoho.in", "port": 465, "ssl": True},
     {"host": "smtp.zoho.in", "port": 465, "ssl": True},
@@ -24,10 +24,24 @@ SMTP_SERVERS = [
     {"host": "smtp.zoho.com", "port": 465, "ssl": True}
 ]
 
+def build_pdf_bytes(domain):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    c.drawString(72, 750, f"IsoFlow Systems - Compliance Mapping Preview for {domain}")
+    c.drawString(72, 730, "-------------------------------------------------------------")
+    c.drawString(72, 700, "Control ID | Framework     | Status   | Extraction Speed")
+    c.drawString(72, 680, "CC1.1      | SOC 2 Type II | Mapped   | 0.38s")
+    c.drawString(72, 660, "A.5.1      | ISO 27001     | Mapped   | 0.42s")
+    c.drawString(72, 640, "CC6.1      | Access Ctrl   | [REDACTED - Purchase Access]")
+    c.drawString(72, 620, "Unlock full audit mapping at https://isoflowai.in")
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
 
-def send_preview_email(recipient, domain, pdf_path):
+def dispatch_email(recipient, domain, pdf_data):
     if not ZOHO_PASS:
-        raise ValueError("ZOHO_PASSWORD environment variable is not configured.")
+        raise ValueError("ZOHO_PASSWORD environment variable is empty or not set on Render.")
 
     msg = MIMEMultipart()
     msg["Subject"] = f"Your Compliance Matrix Preview for {domain}"
@@ -40,20 +54,19 @@ def send_preview_email(recipient, domain, pdf_path):
     )
     msg.attach(MIMEText(body_text, "plain"))
 
-    with open(pdf_path, "rb") as f:
-        attachment = MIMEApplication(f.read(), Name=f"{domain}_preview.pdf")
-        attachment['Content-Disposition'] = f'attachment; filename="{domain}_preview.pdf"'
-        msg.attach(attachment)
+    attachment = MIMEApplication(pdf_data, Name=f"{domain}_preview.pdf")
+    attachment['Content-Disposition'] = f'attachment; filename="{domain}_preview.pdf"'
+    msg.attach(attachment)
 
     errors = []
     for srv in SMTP_SERVERS:
         try:
             if srv["ssl"]:
-                with smtplib.SMTP_SSL(srv["host"], srv["port"], timeout=12) as server:
+                with smtplib.SMTP_SSL(srv["host"], srv["port"], timeout=7) as server:
                     server.login(ZOHO_USER, ZOHO_PASS)
                     server.sendmail(ZOHO_USER, [recipient], msg.as_string())
             else:
-                with smtplib.SMTP(srv["host"], srv["port"], timeout=12) as server:
+                with smtplib.SMTP(srv["host"], srv["port"], timeout=7) as server:
                     server.starttls()
                     server.login(ZOHO_USER, ZOHO_PASS)
                     server.sendmail(ZOHO_USER, [recipient], msg.as_string())
@@ -63,11 +76,15 @@ def send_preview_email(recipient, domain, pdf_path):
 
     raise RuntimeError(f"All SMTP connection attempts failed: {' | '.join(errors)}")
 
-
 @app.route("/", methods=["GET"])
 def health():
-    return "IsoFlow Engine Active", 200
-
+    return jsonify({
+        "status": "active",
+        "service": "IsoFlow Automation Engine",
+        "zoho_user": ZOHO_USER,
+        "zoho_pass_configured": bool(ZOHO_PASS),
+        "telegram_configured": bool(TELEGRAM_BOT_TOKEN)
+    }), 200
 
 @app.route("/api/generate-preview", methods=["POST"])
 def generate_preview():
@@ -79,24 +96,8 @@ def generate_preview():
         if not recipient:
             return jsonify({"status": "error", "message": "Email address is required."}), 400
 
-        # Generate Redacted PDF Preview
-        pdf_path = f"/tmp/{domain}_preview.pdf"
-        c = canvas.Canvas(pdf_path, pagesize=letter)
-        c.drawString(72, 750, f"IsoFlow Systems - Compliance Mapping Preview for {domain}")
-        c.drawString(72, 730, "-------------------------------------------------------------")
-        c.drawString(72, 700, "Control ID | Framework     | Status   | Extraction Speed")
-        c.drawString(72, 680, "CC1.1      | SOC 2 Type II | Mapped   | 0.38s")
-        c.drawString(72, 660, "A.5.1      | ISO 27001     | Mapped   | 0.42s")
-        c.drawString(72, 640, "CC6.1      | Access Ctrl   | [REDACTED - Purchase Access]")
-        c.drawString(72, 600, "Unlock full audit mapping at https://isoflowai.in")
-        c.save()
-
-        # Send via SMTP
-        send_preview_email(recipient, domain, pdf_path)
-
-        # Cleanup temporary local file
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
+        pdf_bytes = build_pdf_bytes(domain)
+        dispatch_email(recipient, domain, pdf_bytes)
 
         return jsonify({
             "status": "success",
@@ -107,9 +108,9 @@ def generate_preview():
         traceback.print_exc()
         return jsonify({
             "status": "error",
+            "error_type": type(e).__name__,
             "message": str(e)
         }), 500
-
 
 @app.route("/telegram/<token>", methods=["POST"])
 def telegram_webhook(token):
@@ -137,7 +138,6 @@ def telegram_webhook(token):
         traceback.print_exc()
 
     return "OK", 200
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
