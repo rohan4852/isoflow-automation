@@ -1,6 +1,8 @@
 import os
 import io
 import traceback
+from urllib.parse import quote
+
 import requests
 from flask import Flask, request, jsonify, send_file
 from reportlab.lib.pagesizes import letter
@@ -9,11 +11,14 @@ from reportlab.pdfgen import canvas
 app = Flask(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://isoflow-automation.onrender.com").rstrip("/")
+
 
 def build_pdf_buffer(domain):
+    safe_domain = (domain or "target-company.com").strip() or "target-company.com"
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
-    c.drawString(72, 750, f"IsoFlow Systems - Compliance Mapping Preview for {domain}")
+    c.drawString(72, 750, f"IsoFlow Systems - Compliance Mapping Preview for {safe_domain}")
     c.drawString(72, 730, "-------------------------------------------------------------")
     c.drawString(72, 700, "Control ID | Framework     | Status   | Extraction Speed")
     c.drawString(72, 680, "CC1.1      | SOC 2 Type II | Mapped   | 0.38s")
@@ -25,44 +30,50 @@ def build_pdf_buffer(domain):
     buffer.seek(0)
     return buffer
 
+
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({
         "status": "active",
         "service": "IsoFlow Engine 24/7",
-        "telegram_configured": bool(TELEGRAM_BOT_TOKEN)
+        "telegram_configured": bool(TELEGRAM_BOT_TOKEN),
+        "public_base_url": PUBLIC_BASE_URL,
     }), 200
+
 
 @app.route("/api/download-preview", methods=["GET"])
 def download_preview():
-    domain = request.args.get("domain", "target-company.com").strip()
-    pdf_buffer = build_pdf_buffer(domain)
+    domain = request.args.get("domain", "target-company.com").strip() or "target-company.com"
     return send_file(
-        pdf_buffer,
+        build_pdf_buffer(domain),
         as_attachment=True,
         download_name=f"{domain}_compliance_preview.pdf",
         mimetype="application/pdf"
     )
 
+
 @app.route("/api/generate-preview", methods=["POST"])
 def generate_preview():
     try:
         data = request.get_json(force=True, silent=True) or {}
-        domain = data.get("domain", "stripe.com").strip()
-        recipient = data.get("email", "rohan@isoflowai.in").strip()
+        if isinstance(data, str):
+            data = {"domain": data}
 
-        # Verify PDF generation in memory
-        _ = build_pdf_buffer(domain)
+        domain = str(data.get("domain", "stripe.com") or "stripe.com").strip() or "stripe.com"
+        recipient = str(data.get("email", "rohan@isoflowai.in") or "rohan@isoflowai.in").strip() or "rohan@isoflowai.in"
+
+        build_pdf_buffer(domain)
 
         return jsonify({
             "status": "success",
             "message": f"Compliance matrix generated for {domain}",
             "recipient": recipient,
-            "download_url": f"https://isoflow-automation.onrender.com/api/download-preview?domain={domain}"
+            "download_url": f"{PUBLIC_BASE_URL}/api/download-preview?domain={quote(domain)}",
         }), 200
 
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e), "trace": traceback.format_exc()}), 500
+    except Exception:
+        return jsonify({"status": "error", "message": "Preview generation failed", "trace": traceback.format_exc()}), 500
+
 
 @app.route("/telegram/<token>", methods=["POST"])
 def telegram_webhook(token):
@@ -80,17 +91,18 @@ def telegram_webhook(token):
                 reply = "IsoFlow 24/7 backend is running normally."
             elif text.startswith("/preview"):
                 domain = text.replace("/preview", "").strip() or "stripe.com"
-                reply = f"Generated preview for {domain}:\nhttps://isoflow-automation.onrender.com/api/download-preview?domain={domain}"
+                reply = f"Generated preview for {domain}:\n{PUBLIC_BASE_URL}/api/download-preview?domain={quote(domain)}"
 
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                 json={"chat_id": chat_id, "text": reply},
                 timeout=10
             )
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
 
     return "OK", 200
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
