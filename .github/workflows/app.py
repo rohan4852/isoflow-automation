@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
-def build_pdf_bytes(domain):
+def build_pdf_buffer(domain):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     c.drawString(72, 750, f"IsoFlow Systems - Compliance Mapping Preview for {domain}")
@@ -29,15 +29,14 @@ def build_pdf_bytes(domain):
 def health():
     return jsonify({
         "status": "active",
-        "service": "IsoFlow Automation Engine",
+        "service": "IsoFlow Engine 24/7",
         "telegram_configured": bool(TELEGRAM_BOT_TOKEN)
     }), 200
 
-# Download PDF directly over HTTPS (bypasses all email port blocks)
 @app.route("/api/download-preview", methods=["GET"])
 def download_preview():
     domain = request.args.get("domain", "target-company.com").strip()
-    pdf_buffer = build_pdf_bytes(domain)
+    pdf_buffer = build_pdf_buffer(domain)
     return send_file(
         pdf_buffer,
         as_attachment=True,
@@ -45,7 +44,6 @@ def download_preview():
         mimetype="application/pdf"
     )
 
-# Lead-magnet endpoint returning preview status & direct download link
 @app.route("/api/generate-preview", methods=["POST"])
 def generate_preview():
     try:
@@ -53,8 +51,8 @@ def generate_preview():
         domain = data.get("domain", "stripe.com").strip()
         recipient = data.get("email", "rohan@isoflowai.in").strip()
 
-        # Generate in-memory preview
-        _ = build_pdf_bytes(domain)
+        # Verify PDF generation in memory
+        _ = build_pdf_buffer(domain)
 
         return jsonify({
             "status": "success",
@@ -79,10 +77,10 @@ def telegram_webhook(token):
 
             reply = f"IsoFlow Engine received: {text}"
             if text.startswith("/status"):
-                reply = "IsoFlow 24/7 backend is running normally on Render."
+                reply = "IsoFlow 24/7 backend is running normally."
             elif text.startswith("/preview"):
                 domain = text.replace("/preview", "").strip() or "stripe.com"
-                reply = f"Generated preview for {domain}: https://isoflow-automation.onrender.com/api/download-preview?domain={domain}"
+                reply = f"Generated preview for {domain}:\nhttps://isoflow-automation.onrender.com/api/download-preview?domain={domain}"
 
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
